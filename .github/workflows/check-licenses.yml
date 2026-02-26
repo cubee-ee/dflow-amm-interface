@@ -43,8 +43,14 @@ jobs:
             target
           key: check-licenses-${{ runner.os }}-${{ steps.rust-toolchain.outputs.cachekey }}-${{ hashFiles('Cargo.lock') }}
 
+      - uses: actions/checkout@v6
+        with:
+          repository: 'DFlowProtocol/license-checker-action'
+          token: ${{ secrets.LICENSE_AUDIT_PAT_TOKEN }}
+          path: './.github/actions/license-checker'
+
       - name: Check licenses
-        uses: DFlowProtocol/actions/license-checker@v1
+        uses: ./.github/actions/license-checker
         continue-on-error: true
         with:
           allowed-licenses: ${{ vars.LICENSE_AUDIT_ALLOWED_LICENSES }}
