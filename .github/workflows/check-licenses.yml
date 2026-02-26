@@ -24,6 +24,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
+      - name: Checkout license-checker-action
+        uses: actions/checkout@v6
+        with:
+          repository: 'DFlowProtocol/license-checker-action'
+          token: ${{ secrets.LICENSE_AUDIT_PAT_TOKEN }}
+          path: './.github/actions/license-checker'
+
       # syft depends on populated dependency cache
       # in order to build the SBOM
 
@@ -42,12 +49,6 @@ jobs:
             ~/.cargo/git/db/
             target
           key: check-licenses-${{ runner.os }}-${{ steps.rust-toolchain.outputs.cachekey }}-${{ hashFiles('Cargo.lock') }}
-
-      - uses: actions/checkout@v6
-        with:
-          repository: 'DFlowProtocol/license-checker-action'
-          token: ${{ secrets.LICENSE_AUDIT_PAT_TOKEN }}
-          path: './.github/actions/license-checker'
 
       - name: Check licenses
         uses: ./.github/actions/license-checker
