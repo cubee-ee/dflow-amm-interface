@@ -1,0 +1,15 @@
+[package]
+name = "cube-amm"
+version = "0.0.1"
+edition = "2021"
+license = "Apache-2.0"
+description = "Cube DEX (cubic-pool) connector implementing dflow-amm-interface::Amm"
+
+[lib]
+name = "cube_amm"
+
+[dependencies]
+dflow-amm-interface = { path = "../.." }
+solana-sdk = { version = "=2.3.*" }
+spl-associated-token-account = "=4.0.0"
+anyhow = "1.0"

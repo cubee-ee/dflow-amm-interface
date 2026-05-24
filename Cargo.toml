@@ -1,3 +1,7 @@
+[workspace]
+members = [".", "crates/cube-amm"]
+resolver = "2"
+
 [package]
 name = "dflow-amm-interface"
 version = "0.0.1"
