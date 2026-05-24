@@ -530,6 +530,7 @@ dependencies = [
  "dflow-amm-interface",
  "solana-sdk",
  "spl-associated-token-account",
+ "spl-token",
 ]
 
 [[package]]
