@@ -22,14 +22,16 @@ use crate::constants::{BPT_MINT_SEED, CUBIC_POOL_PROGRAM_ID, CUBIC_POOL_SEED};
 use crate::ix::{build_swap_account_metas, encode_swap_ix_data, SwapAccounts};
 use crate::math::cubic_math::calc_out_given_in;
 use crate::math::fee::apply_swap_fee;
+use crate::math::max_selloff::{check as max_selloff_check, SelloffInputs};
 use crate::state::PoolState;
 use anyhow::{anyhow, Result};
 use dflow_amm_interface::{
-    AccountMap, Amm, AmmContext, KeyedAccount, Quote, QuoteParams, Swap, SwapAndAccountMetas,
-    SwapParams,
+    AccountMap, Amm, AmmContext, ClockRef, KeyedAccount, Quote, QuoteParams, Swap,
+    SwapAndAccountMetas, SwapParams,
 };
 use solana_sdk::{instruction::Instruction, pubkey::Pubkey};
 use std::collections::HashSet;
+use std::sync::atomic::Ordering;
 
 /// Connector instance for one cubic_pool pool.
 #[derive(Clone)]
@@ -42,6 +44,9 @@ pub struct CubeAmm {
     reserve_mints: Vec<Pubkey>,
     /// Decoded pool state, refreshed each `update()`.
     state: PoolState,
+    /// Shared clock reference from `AmmContext`. Used to evaluate the
+    /// per-token sliding-window selloff cap in `quote`.
+    clock_ref: ClockRef,
 }
 
 impl CubeAmm {
@@ -123,7 +128,7 @@ impl CubeAmm {
 }
 
 impl Amm for CubeAmm {
-    fn from_keyed_account(keyed_account: &KeyedAccount, _ctx: &AmmContext) -> Result<Self> {
+    fn from_keyed_account(keyed_account: &KeyedAccount, ctx: &AmmContext) -> Result<Self> {
         let state = PoolState::decode(&keyed_account.account.data)?;
         let reserve_mints = state
             .active_tokens()
@@ -135,6 +140,7 @@ impl Amm for CubeAmm {
             program_id: keyed_account.account.owner,
             reserve_mints,
             state,
+            clock_ref: ctx.clock_ref.clone(),
         })
     }
 
@@ -305,6 +311,20 @@ impl CubeAmm {
         lp_actual_out: u64,
         amount: u64,
     ) -> Result<u64> {
+        // On-chain swap.rs runs `max_selloff::check_and_advance` BEFORE the
+        // fee subtraction, using the gross `amount_in`. Replicate that
+        // order — if the sliding window blocks, the curve never runs.
+        max_selloff_check(
+            &SelloffInputs {
+                max_selloff: in_slot.max_selloff,
+                period_length: in_slot.max_selloff_period_length,
+                previous_selloff: in_slot.previous_selloff,
+                current_selloff: in_slot.current_selloff,
+                window_start_timestamp: in_slot.window_start_timestamp,
+            },
+            amount,
+            self.clock_ref.unix_timestamp.load(Ordering::Relaxed),
+        )?;
         let (_fee, after) = apply_swap_fee(amount, self.state.swap_fee_rate)?;
         if after == 0 {
             return Err(anyhow!("CubeAmm: amount_in_after_fee = 0"));

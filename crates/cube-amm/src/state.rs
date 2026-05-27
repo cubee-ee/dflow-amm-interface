@@ -21,11 +21,21 @@ pub struct TokenSlot {
     pub mint: Pubkey,
     pub token_program: Pubkey,
     pub normalized_weight: u64,
+    /// Sliding-window cap on `amount_in` for THIS token. `0` disables.
+    pub max_selloff: u64,
+    /// Sliding-window length in seconds. Must be `> 0` whenever
+    /// `max_selloff > 0`.
+    pub max_selloff_period_length: u32,
     pub virtual_balance: u64,
     pub actual_balance: u64,
     pub protocol_fees_owed: u64,
-    // The other AssetConfig / AssetDynamics fields exist but aren't needed
-    // by the swap quote path. Add them on demand.
+    /// `amount_in` summed over the PREVIOUS sliding-window bucket.
+    pub previous_selloff: u64,
+    /// `amount_in` summed over the CURRENT bucket.
+    pub current_selloff: u64,
+    /// Start of the current bucket; `Clock::unix_timestamp` at the last
+    /// window rotation.
+    pub window_start_timestamp: i64,
 }
 
 #[derive(Debug, Clone)]
@@ -75,34 +85,51 @@ impl PoolState {
             mint: Pubkey::default(),
             token_program: Pubkey::default(),
             normalized_weight: 0,
+            max_selloff: 0,
+            max_selloff_period_length: 0,
             virtual_balance: 0,
             actual_balance: 0,
             protocol_fees_owed: 0,
+            previous_selloff: 0,
+            current_selloff: 0,
+            window_start_timestamp: 0,
         }; MAX_TOKENS];
 
         let token_base = 179usize;
         let slot_size = 144usize;
         for i in 0..MAX_TOKENS {
             let off = token_base + i * slot_size;
-            // AssetConfig (88B)
+            // AssetConfig (88 B): mint(32) + token_program(32) +
+            //   normalized_weight(8) + max_selloff(8) +
+            //   max_selloff_period_length(4) + reserved[4].
             let mint = read_pubkey(data, off);
             let token_program = read_pubkey(data, off + 32);
             let normalized_weight = read_u64(data, off + 64);
-            // skip max_selloff (8) + max_selloff_period_length (4) + reserved (4)
-            // AssetDynamics (56B) starts at off + 88
+            let max_selloff = read_u64(data, off + 72);
+            let max_selloff_period_length = read_u32(data, off + 80);
+            // AssetDynamics (56 B) starts at off + 88: virtual_balance(8) +
+            //   actual_balance(8) + protocol_fees_owed(8) +
+            //   previous_selloff(8) + current_selloff(8) +
+            //   window_start_timestamp(8) + reserved[8].
             let virtual_balance = read_u64(data, off + 88);
             let actual_balance = read_u64(data, off + 96);
             let protocol_fees_owed = read_u64(data, off + 104);
-            // remaining slot fields (previous_selloff/current_selloff/
-            // window_start_timestamp/reserved) are not needed for quoting.
+            let previous_selloff = read_u64(data, off + 112);
+            let current_selloff = read_u64(data, off + 120);
+            let window_start_timestamp = read_i64(data, off + 128);
 
             tokens[i] = TokenSlot {
                 mint,
                 token_program,
                 normalized_weight,
+                max_selloff,
+                max_selloff_period_length,
                 virtual_balance,
                 actual_balance,
                 protocol_fees_owed,
+                previous_selloff,
+                current_selloff,
+                window_start_timestamp,
             };
         }
 
@@ -149,6 +176,11 @@ fn read_u32(data: &[u8], off: usize) -> u32 {
     let mut bytes = [0u8; 4];
     bytes.copy_from_slice(&data[off..off + 4]);
     u32::from_le_bytes(bytes)
+}
+
+#[inline]
+fn read_i64(data: &[u8], off: usize) -> i64 {
+    read_u64(data, off) as i64
 }
 
 #[inline]
