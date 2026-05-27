@@ -24,3 +24,7 @@ solana-client = "=2.3.*"
 [[example]]
 name = "live_integration"
 path = "examples/live_integration.rs"
+
+[[example]]
+name = "feature_coverage_live"
+path = "examples/feature_coverage_live.rs"
